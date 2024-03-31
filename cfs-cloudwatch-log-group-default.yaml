@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  StackSet template that provisions a Lambda function to set CloudWatch Log Group
+  retention policies across all organization accounts.
+Parameters:
+  DefaultLogRetention:
+    Type: "Number"
+    Description: "Default retention period for CloudWatch log groups in days"
+    Default: 365
+    AllowedValues:
+      [
+        1,
+        3,
+        5,
+        7,
+        14,
+        30,
+        60,
+        90,
+        120,
+        150,
+        180,
+        365,
+        400,
+        545,
+        731,
+        1096,
+        1827,
+        2192,
+        2557,
+        2922,
+        3288,
+        3653,
+      ]
+Resources:
+  LambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "lambda.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "CloudWatchLogsManagement"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "logs:DescribeLogGroups"
+                  - "logs:PutRetentionPolicy"
+                Resource: "*"
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+
+  CloudWatchLogsRetentionLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "index.lambda_handler"
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          default_log_retention: !Ref DefaultLogRetention
+          logger_level: "INFO"
+      Code:
+        ZipFile: |
+          import logging
+          import os
+          import boto3
+          from typing import TYPE_CHECKING
+
+          if TYPE_CHECKING:
+              from mypy_boto3_logs import CloudWatchLogsClient
+
+          logger = logging.getLogger()
+          logging.basicConfig(format="%(asctime)s %(message)s")
+          logger.setLevel(os.environ.get("logger_level", logging.DEBUG))
+
+
+          def lambda_handler(event, context) -> None:
+              """
+              Lambda function handler for setting default retention policy for CloudWatch log groups.
+              """
+              log_client: CloudWatchLogsClient = boto3.client("logs")
+              default_log_retention = os.environ.get("default_log_retention", 365)
+              log_group_name = event["requestParameters"]["logGroupName"]
+
+              if "retentionInDays" not in event["requestParameters"]:
+                  logger.info(f"Setting default retention policy for log group: {log_group_name}")
+                  log_client.put_retention_policy(
+                      logGroupName=log_group_name, retentionInDays=int(default_log_retention)
+                  )
+      Runtime: "python3.12"
+      Timeout: 60
+      MemorySize: 128
+
+  LambdaInvokePermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt CloudWatchLogsRetentionLambda.Arn
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt LogGroupCreationRule.Arn
+
+  LogGroupCreationRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: "Trigger Lambda on CloudWatch Log Group creation"
+      EventPattern:
+        source:
+          - "aws.logs"
+        detail-type:
+          - "AWS API Call via CloudTrail"
+        detail:
+          eventSource:
+            - "logs.amazonaws.com"
+          eventName:
+            - "CreateLogGroup"
+            - "DeleteRetentionPolicy"
+      State: "ENABLED"
+      Targets:
+        - Arn: !GetAtt CloudWatchLogsRetentionLambda.Arn
+          Id: "CloudWatchLogsRetentionLambda"
+
+Outputs:
+  LambdaFunctionArn:
+    Description: "ARN of the Lambda function"
+    Value: !GetAtt CloudWatchLogsRetentionLambda.Arn
