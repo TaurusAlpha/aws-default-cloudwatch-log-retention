@@ -132,6 +132,7 @@ Resources:
       Targets:
         - Arn: !GetAtt CloudWatchLogsRetentionLambda.Arn
           Id: "CloudWatchLogsRetentionLambda"
+          InputPath: "$.detail"
 
 Outputs:
   LambdaFunctionArn:
