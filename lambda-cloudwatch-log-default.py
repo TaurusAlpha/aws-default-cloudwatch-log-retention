@@ -7,8 +7,9 @@ if TYPE_CHECKING:
     from mypy_boto3_logs import CloudWatchLogsClient
 
 # Configure logging
-logging.basicConfig(format="%(asctime)s %(message)s",level=logging.getLevelName(os.getenv("logger_level", "DEBUG")))
 logger = logging.getLogger()
+logging.basicConfig(format="%(asctime)s %(message)s")
+logger.setLevel(logging.getLevelName(os.getenv("logger_level", "DEBUG")))
 
 
 def lambda_handler(event, context) -> None:
